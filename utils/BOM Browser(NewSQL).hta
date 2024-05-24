@@ -1,0 +1,1444 @@
+<title>BOM Browser</title>
+<head>
+	<meta http-equiv="x-ua-compatible" content="IE=8" />
+</head>
+<HTA:APPLICATION ID="BOMBrowse" 
+	APPLICATIONNAME="BOM Browser"
+	ICON="Q:\In-Div Share\_JBrady\BomBrowser.ICO"
+	CAPTION="yes"
+	SYSMENU="yes"
+	SHOWINTASKBAR="yes"
+	MAXIMIZEBUTTON="no"
+	MINIMIZEBUTTON="yes"
+	>
+<SCRIPT LANGUAGE="VBScript">
+dim Assys()
+dim Parts()
+dim oShell 
+dim fso
+dim InOrOut
+const BoxLimit = 100
+const tvwChild = 4
+dim WasDblClick
+dim TimID
+dim TimeReport
+dim StartingFilter
+
+CONST BGtopCOLOR = "'#E0F2F7'"
+CONST BGbottomCOLOR = "'#A9D0F5'"
+CONST BUSYtopCOLOR = "'#FF0000'"
+
+Const MatixConStr = "Driver={SQL Server};Server=NAmtsql;Database=Matix;Trusted_Connection=True"
+'const MatixTreePath = "C:\Users\Becky\Desktop\HTA stuff\matix_db.mdb" 'Test path
+'Const MatixTreePath = "M:\MATIX_DB\TACTICS\Ftm\Rcv\MATIX_DB.MDB" 'Live Path
+Const DwgDBpath = "Q:\In-Div Share\_JBrady\JobScanIndex.mdb"
+Const IconFldr = "Q:\In-Div Share\_JBrady\HTAIcons\"
+const MatixChkPath = "M:\ME Design\Technical information\MatixPartLookup.xls"
+const IVIEWPATH = """C:\Program Files\IrfanView\i_view64.exe"" "
+dim sIviewOrNothing
+
+Dim oConn 'Matix connection
+Dim oDwgConn 'Drawing DB Connection
+Dim oDwgRst 'Recordset for the drawing DB.  Will open this one and keep disconnected.
+
+Dim MemoryNode 'set when clicking a node.  Used by the double-click event since Treeview.SelectedNode doesn't seem to work in an HTA.
+
+'************
+'Log File Declarations
+Dim LogFSO
+Dim LogFile
+Dim bLog 'Create log or not
+Dim bShow 'Show log or not
+Dim TimeIt
+Const ClearEachRun = 2 '2 to clear for each run, 8 for append
+Const LogLoc = "C:\ScriptLog\" 'folder must exist.
+Const LogName = "mySqlLog.txt"
+Const StartLogging = False
+Const ShowLog = False
+'*************
+
+
+sub Window_OnLoad
+	'Set objOption = Document.createElement("OPTION")
+        'objOption.Text = "Another Option"
+        'objOption.Value = 5
+        'dropdown1.Add(objOption)
+	'dim scriptref
+	'set scriptref = getref("MouseOverScript")
+	'document.onmouseover=getref("MouseOverScript")
+	'document.onmouseout = getref("MouseOutScript")
+	'FixRegistryDataAccess 'Subroutine in this file. When connecting by Remote Access, default setup disables data access across domains, which prevents this HTA from accessing database.
+	'The above line is commented out due to better solution found: When opening with Remote Access,
+	'use a shortcut that points to this file using UNC path naming (\\101-gsdepts\mt$\In-Div Share\_JBrady) rather than drive letter.
+	StartingFilter = Get1OpenArg 'Starting filter might be passed from command line (for example, started by Job Finder), or might be ""
+	'msgbox StartingFilter
+	WasDblClick = false
+	dim sSql
+	dim oRst '  will hold all the assembly M-numbers (start with M-0...)
+	Dim oRst2 'Will hold all the part and subassembly M-numbers
+	'set some window/control params
+	On Error Resume Next 
+	window.resizeto 1350,970
+	document.body.style.filter = "progid:DXImageTransform.Microsoft.Gradient(GradientType=0, StartColorStr=" & BGtopCOLOR & ", EndColorStr=" & BGbottomCOLOR & ")"
+	treeview1.font.name = "Arial"
+	treeview1.font.size = 10
+	treeview2.font.name = "Arial"
+	treeview2.font.size = 10
+	On Error Goto 0
+	
+	'****Initialize logging
+	bLog = StartLogging  'Required to set logging on
+	if bLog Then bLog = InitLog 'Initialize the log file. If init fails, bLog turns "false"
+	bShow = ShowLog 'True shows the log automatically 
+	'****Log Initialize Complete
+	
+	'Load the imagelist with images for the drawing tree
+	Dim myImg1
+    Set myImg1 = ImageList1.ListImages.Add(1, "UnChk", LoadPicture(IconFldr & "UnChk.bmp"))
+    Set myImg1 = ImageList1.ListImages.Add(2, "Chk", LoadPicture(IconFldr & "Chk.bmp"))
+    Set myImg1 = ImageList1.ListImages.Add(3, "Miss", LoadPicture(IconFldr & "Miss.bmp"))
+    Set myImg1 = ImageList1.ListImages.Add(4, "NoPic", LoadPicture(IconFldr & "NoPic.bmp"))
+    Set myImg1 = ImageList1.ListImages.Add(5, "Dwg", LoadPicture(IconFldr & "Dwg.bmp"))
+    TreeView1.ImageList = ImageList1
+    TreeView2.ImageList = ImageList1
+	TimeIt = Timer
+	'Open the connection to Matix. We will disconnect these recordsets and close the connection.
+	set oConn = CreateObject("ADODB.Connection")
+	oConn.ConnectionString =  MatixConStr  '  "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=" & MatixTreePath
+	oConn.Open
+	
+	'Open the connection to the drawing database. We will disconnect these recordsets and close the connection.
+	set oDwgConn = CreateObject("ADODB.Connection")
+	oDwgConn.ConnectionString = MatixConStr '"Provider=Microsoft.Jet.OLEDB.4.0;Data Source=" & DwgDBpath 
+	oDwgConn.Open
+	Set oDwgRst = CreateObject("ADODB.Recordset")
+	odwgRst.CursorLocation = 3 'aduseclient
+	oDwgRst.Open "Select * from [FileIndex] ORDER BY [Mnumber] DESC, [FileName];", oDwgConn, 3, 4 'adOpenStatic, adLockBatchOptimistic
+	'msgbox odwgconn.errors(0)
+	oDwgRst.ActiveConnection = nothing
+	oDwgConn.Close
+	Set oDwgConn = nothing
+	logit "Got drawing recordset - " & odwgrst.recordcount, 2
+	TimeIt = Timer
+	'Get the recordset for all assemblies
+	set oRst = CreateObject("ADODB.Recordset")
+	oRst.CursorLocation = 3 'adUseClient
+	'Get all the assemblies for the assembly box
+	sSql = "SELECT [MATIX_E_BOM_LIST].HINBAN, [MATIX_E_BOM_LIST].HINMEI, [MATIX_E_BOM_LIST].YOBI_KATASHIKI, [MATIX_E_BOM_LIST].MATSUBI, "
+	sSql = sSql & "[MATIX_E-JOB_NO].DESIGN_NO "
+	ssql = ssql & "FROM [MATIX_E_BOM_LIST] "
+	sSql = sSql & "LEFT OUTER JOIN [MATIX_E-JOB_NO] "
+	sSql = sSql & "ON [MATIX_E_BOM_LIST].HINBAN like [MATIX_E-JOB_NO].HINBAN "
+	sSql = sSql & "WHERE [MATIX_E_BOM_LIST].ASP_KBN = 'A' "
+	sSql = sSql & "ORDER BY CASE WHEN DESIGN_NO IS NULL THEN 1 ELSE 0 END, DESIGN_NO;"
+	'msgbox ssql
+	oRst.Open sSql, oConn,  3,  4 'adOpenStatic, adLockBatchOptimistic
+	'msgbox orst.recordcount
+	Set oRst.ActiveConnection = nothing
+	logit "Got assemblies recordset - " & orst.recordcount, 2
+	TimeIt = Timer
+	'Get every non-assembly and load to box
+	sSql = "SELECT [MATIX_E_BOM_LIST].HINBAN, [MATIX_E_BOM_LIST].HINMEI, [MATIX_E_BOM_LIST].YOBI_KATASHIKI, [MATIX_E_BOM_LIST].MATSUBI  "
+	ssql = ssql & "FROM [MATIX_E_BOM_LIST] "
+	sSql = sSql & "WHERE [MATIX_E_BOM_LIST].ASP_KBN <> 'A' and [MATIX_E_BOM_LIST].HINBAN NOT LIKE '@%' "
+	sSql = sSql & "ORDER BY HINBAN;"
+	set oRst2 = CreateObject("ADODB.Recordset")
+	oRst2.CursorLocation = 3 'adUseClient
+	oRst2.Open sSql, oConn,  3,  4 'adOpenStatic, adLockBatchOptimistic
+	Set oRst2.ActiveConnection = Nothing
+	LogIt "Got parts recordset - " & orst2.recordcount , 2
+	'Close the connection
+	oConn.Close
+
+	'Populate the M-numbers box
+	oRst.MoveLast
+	oRst.MoveFirst
+	redim Assys(1, oRst.RecordCount - 1)
+	dim i 
+	dim AddStr
+	for i = 1 to oRst.RecordCount
+		Assys(0,i-1) = oRst("HINBAN").Value
+		AddStr = left(oRst("HINBAN").Value, len(oRst("HINBAN").Value)-1) & oRst("MATSUBI") & " | "
+		'msgbox ISNULL(orst("DESIGN_NO").VALUE)
+		if ISNULL(oRst("DESIGN_NO")) then
+			addstr = addstr & "                    "
+		else
+			AddStr = AddStr & oRst("DESIGN_NO").Value
+		end if
+		AddStr = AddStr & " | " & oRst("HINMEI").Value
+		Assys(1,i-1) = AddStr
+		oRst.MoveNext
+	next
+	LoadBox dropdown1, Assys,""
+	LogIt "Assys Loaded", 2
+	TimeIt = Timer
+	'Populate the parts box
+	oRst2.MoveLast
+	oRst2.MoveFirst
+	'msgbox oRst.RecordCount
+	redim Parts(1, oRst2.RecordCount - 1)
+	for i = 1 to oRst2.RecordCount
+		Parts(0,i-1) = oRst2("HINBAN").Value
+		if left(oRst2("HINBAN"), 1) = "Z" then
+			Parts(1,i-1) = oRst2("YOBI_KATASHIKI").Value & " | " & oRst2("HINMEI").Value
+		else
+			Parts(1,i-1) = left(oRst2("HINBAN").Value, len(oRst2("HINBAN").Value)-1) & oRst2("MATSUBI") & " | " & oRst2("HINMEI").Value
+		end if
+		oRst2.MoveNext
+	next
+	LoadBox dropdown2, Parts,""
+	LogIt "Parts Loaded", 2
+	TimeIt = Timer
+	Set oRst = nothing
+	set oRst2 = nothing
+	set MemoryNode = Nothing
+	
+	'If a starting filter was passed in the command line, put it in the M-number top level filter
+	if StartingFilter <> "" then
+		my_combo.value = StartingFilter
+		FilterAssys
+	end if
+	
+	'Look for IrfanView.  If not present, set path string to empty and files will be opened with default viewer.
+	set fso = createobject("Scripting.FileSystemObject")
+	if fso.fileexists(IVIEWPATH) then
+		sIviewOrNothing = IVIEWPATH 
+	else
+		sIviewOrNothing = ""
+	end if
+	set fso = nothing
+	
+end sub
+
+Sub TreeView1_NodeClick(theNode)
+	set MemoryNode = theNode 
+	if theNode.Image = 1 then 'node is an un-checked checkbox... Check it!
+		theNode.Image = 2 'checked box
+	elseif thenode.image = 2 then
+		thenode.image = 1
+	end if
+	if chkOneClickBrowse.checked = true then
+		if (thenode.image = 1) or (thenode.image = 2) then
+			dim KeySplit
+			KeySplit = Split(MemoryNode.key, "|")
+			Set oShell = CreateObject("Wscript.shell")
+			oShell.run sIviewOrNothing & """" & KeySplit(UBound(KeySplit)) & """" , 3, False
+			set oShell = nothing
+		end if
+	end if
+End Sub
+
+Sub TreeView2_NodeClick(theNode)
+	set MemoryNode = theNode 
+	'add code here for selecting/deselecting for dump
+	if theNode.Image = 1 then 'node is an un-checked checkbox... Check it!
+		theNode.Image = 2 'checked box
+	elseif thenode.image = 2 then
+		thenode.image = 1
+	end if
+
+End Sub
+
+sub PartsExpand
+	dim PartNo
+	dim myOpt
+	Dim myNode
+	dim TopLevelList
+	'Get the M assembly number of the selected line
+	TreeView2.Nodes.Clear
+	for each myopt in dropdown2.options
+		if myopt.selected then
+			PartNo = myopt.value
+			exit for
+		end if
+	next
+	Set myNode = TreeView2.Nodes.Add( , , "k1", PartNo)
+	'PartNo may be a purchased part number or an M-number. Need to check...
+	'We don't have to do this during PopulateParents because that gets its data directly 
+	'from the database, not from the data displayed in the box.
+	if left(PartNo,1) = "M" then
+		if len(PartNo) = 11 then
+			if IsNumeric(right(PartNo, 10)) then
+				'This is probably a fab part or assembly...  Strip last digit and add "0" since all HINBAN end in 0.
+				PartNo = Left(PartNo, 10) & "0"
+			end if
+		end if
+	end if
+	oConn.Open
+	Dim DwgsFound
+	DwgsFound = AddDrawingsBottomUp(PartNo, "k1", treeview2)
+	If DwgsFound > 0 Then
+		myNode.image = 5 'drawing icon - checkboxes will be added for drawings
+	Else
+		myNode.image = 3
+	End if
+	PopulateParents PartNo, "k1", TopLevelList
+	if len(TopLevelList) > 0 then
+		TopLevelList = left(toplevellist, len(toplevellist)-1)
+		dim ListArray
+		ListArray = Split(TopLevelList, ",")
+		LoadBoxFromArray dropdown1, Assys, ListArray
+	end if
+	oConn.Close
+end sub
+
+sub AssyExpand
+	'This short code will clear the drawing box, then add a message to the screen that tells
+	'the user that it is working.  Then it will set a timeout to allow the screen to update.
+	'The timeout will trigger "AssyExpandAfterTimeout"
+	dim TimeoutValue
+	TimeReport = Timer
+	TimeoutValue = 10
+	document.body.style.filter = "progid:DXImageTransform.Microsoft.Gradient(GradientType=0, StartColorStr=" & BUSYtopCOLOR & ", EndColorStr=" & BGbottomCOLOR & ")"
+	AssyBusyLabel.innerHTML = "Checking the database... Keep yer pants on! This could take a while...  "
+	TimID = Window.setTimeout("AssyExpandAfterTimeout", TimeoutValue, "VBScript")
+end sub
+
+sub AssyExpandAfterTimeout
+	'this is AfterTimeout to allow for the form to
+	'update and tell the user that you are working.
+	Window.ClearTimeout TimID 
+	dim AssyNo
+	dim myOpt
+	Dim myNode
+	dim rstBOM
+	'Get the M assembly number of the selected line
+	TimeIt = Timer
+	for each myopt in dropdown1.options
+		if myopt.selected then
+			AssyNo = myopt.value
+			exit for
+		end if
+	next
+	TreeView1.Nodes.Clear
+	Set myNode = TreeView1.Nodes.Add( , , "k1", myopt.text)
+	'AssyNo may be a purchased part number or an M-number. Need to check...
+	'We don't have to do this during PopulateChildren because that gets its data directly 
+	'from the database, not from the data displayed in the box.
+	if left(AssyNo,1) = "M" then
+		if len(AssyNo) = 11 then
+			if IsNumeric(right(AssyNo, 10)) then
+				'This is probably a fab part or assembly...  Strip last digit and add "0" since all HINBAN end in 0.
+				AssyNo = Left(AssyNo, 10) & "0"
+			end if
+		end if
+	end if
+	oConn.Open 'open the connection again
+	logit "Get BOM for " & assyno, 2
+	set rstBOM = GetBOM(AssyNo, oConn)
+	Dim DwgsFound
+	DwgsFound = AddDrawings(rstBOM, AssyNo, "k1", treeview1)
+	If DwgsFound > 0 Then
+		myNode.image = 5 'drawing icon - checkboxes will be added for drawings
+	Else
+		myNode.image = 3
+	End if
+	LogIt "pop childre", 2
+	PopulateChildren AssyNo, "k1" , DwgsFound + 1, rstBOM
+	oConn.Close 'close the connection again
+	TimeReport = round(timer - TimeReport, 1)
+	if TimeReport > 5 then
+		AssyBusyLabel.innerHTML = "Told ya.  That took " & TimeReport & "s    "
+	else
+		AssyBusyLabel.innerHTML = "Guess that was pretty fast after all. Only took " & TimeReport & "s    "
+	end if
+	document.body.style.filter = "progid:DXImageTransform.Microsoft.Gradient(GradientType=0, StartColorStr=" & BGtopCOLOR & ", EndColorStr=" & BGbottomCOLOR & ")"
+end sub
+
+function getBOM(Mno, myConn)
+    Dim sSql 'As String
+    
+	'There's something wrong with this query such that it returns two "ASP" columns and two "Rev" columns.
+	'The first one is correct, the second is incorrect.  To access the correct rev, have to use
+	'field index "7"
+    sSql = "WITH myCTE (Parent, Chld, Balloon, ASP, Name, PurNo, Qty, Rev, Level, Path) " & _
+        "AS (" & _
+        "SELECT cast('' as nvarchar(20)) AS Parent, " & _
+        "list.HINBAN AS Chld, " & _
+        "cast('' as nvarchar(3)) as Balloon, " & _
+        "list.ASP_KBN as ASP, " & _
+        "list.HINMEI as Name, " & _
+        "list.YOBI_KATASHIKI as PurNo, " & _
+        "cast(0 as decimal(10,5)) as Qty, " & _
+        "list.MATSUBI as Rev, " & _
+        "0 as Level, " & _
+        "cast('" & "' as nvarchar(200)) as Path " & _
+        "FROM MATIX_E_BOM_LIST AS list " & _
+        "WHERE list.HINBAN = '" & Mno & "' " & _
+        "UNION ALL "
+        
+    sSql = sSql & "SELECT tree.OYA_HINBAN as Parent, " & _
+        "tree.KO_HINBAN AS Chld, " & _
+        "tree.FUGOH AS Balloon, " & _
+        "list.ASP_KBN as ASP, " & _
+        "list.HINMEI as Name, " & _
+        "list.YOBI_KATASHIKI as PurNo, " & _
+        "cast(tree.SURYO as decimal(10,5)) as Qty, " & _
+        "list.MATSUBI as Rev, " & _
+        "Level + 1, cast((Path + tree.OYA_HINBAN + ISNULL(tree.FUGOH,'000')) as nvarchar(200)) " & _
+        "FROM MATIX_E_BOM_TREE AS tree " & _
+        "INNER JOIN MATIX_E_BOM_LIST AS list " & _
+        "ON tree.KO_HINBAN = list.HINBAN " & _
+        "INNER JOIN myCTE AS c " & _
+        "ON tree.OYA_HINBAN = c.Chld" & _
+        ") "
+        
+    sSql = sSql & "SELECT myCTE.*, FileIndex.* " & _
+		"FROM myCTE " & _
+		"LEFT JOIN FileIndex " & _
+		"ON myCTE.Chld = FileIndex.Mnumber " & _
+		"ORDER BY Path, Balloon, FileName;"
+		msgbox ssql
+	myconn.commandtimeout = 0
+	Set getBOM = myConn.Execute(sSql)
+
+end function
+
+sub PopulateChildren(Mno, Lvl, ChildStart, oRST)
+	dim curItem
+    dim theRev
+	LogIt "Expand Level " & Lvl, 2
+	curItem = childstart 
+	dim NodStr
+	Dim NodImg 'This will be set to 1,2,3,4
+	Dim myNode
+	Dim DwgsFound
+	Dim CurParent
+	Dim CurLevel
+	logit "Begin populating children of " & oRst("Parent").Value & " " &  oRst("Level").value, 2
+	CurParent = oRst("Parent").value
+	CurLevel = oRst("Level").value
+	LogIt "Start Loop for children of " & curparent, 2
+	do while (oRst("Parent") = CurParent) and (oRst("Level") = CurLevel) and (not oRst.EOF)
+		NodStr = ""
+		NodStr = NodStr & " |" & oRst("Balloon") & "| " 'Balloon Number
+		if left(oRst("Chld"), 1) = "Z" Then 'this is a purchase part.
+			NodStr = NodStr & oRst("PurNo") 'use the part number, not the Z number
+			NodImg = 4 'This is "NoPic" image - Just dots
+		else
+			'There's something wrong with the SQL query that gets this recordset.  It creates
+			'two "Rev" fields, (also two "ASP" fields).  Only the first one is correct, but
+			'have to use index 7 to reference it.
+            if isnull(orst(7)) then '"Rev"
+                theRev = "0"
+            else
+                theRev = orst(7)
+            end if
+			NodStr = NodStr & left(oRst("Chld").Value, len(oRst("Chld").Value)-1) & theRev
+			NodImg = 1 'Un-checked
+		end if
+		Nodstr = NodStr & " |" & oRst("Qty")
+		NodStr = NodStr & "| " & oRst("Name")
+		DwgsFound = 0
+		Set myNode = TreeView1.Nodes.Add(Lvl , tvwChild, Lvl & "-" & CurItem, NodStr)
+		If NodImg = 1 Then 'If it was an M-number, go try to find drawings
+			LogIt "Get Drawings for " & orst("Chld"), 2
+			DwgsFound = AddDrawings(oRst, oRst("Chld").Value, lvl & "-" & curItem, treeview1)
+			If DwgsFound = 0 Then
+				NodImg = 3 'missing
+			Else
+				NodImg = 5 'drawing icon - checkboxes will be added for drawings
+			End if
+		Else
+			oRst.MoveNext
+		End If
+		myNode.image = NodImg 
+		if oRst.EOF then exit do
+		if oRst("Level").Value > CurLevel then
+			PopulateChildren oRst("Parent").Value, Lvl & "-" & curItem, DwgsFound +1, oRst
+		end if
+		if oRst.EOF then exit do
+		CurItem = CurItem + 1
+	loop
+	LogIt "Done  Expand children of " & curparent, 2
+	
+end sub
+
+Function AddDrawings(myRst, Mno, Lvl, tView)
+	Dim DwgCount
+	Dim i 
+	Dim myNod
+	Dim NodImg
+	Dim NodStr
+	Dim PathSplit
+	Dim CurChild
+	Dim CurParent
+	DwgCount = 0
+	'oDwgRst.Filter = "[Mnumber] like '" & Left(mno, Len(mno)-1) & "%'" 'TESTED REMOVING FILTER AND JUST ITERATING ENTIRE DB. Much slower!
+	'Also tested re-querying the database with a where clause.  Also much slower.
+	'oDwgRst.Sort = "[Mnumber] DESC, [FileName]" 'sort was removed here and moved to the original SQL query to drastically reduce processing time.
+	'oDwgRst.MoveFirst
+	'oDwgRst.Find "[Mnumber] like '" & Left(mno, Len(mno)-1) & "%'", 0, 1 'skiprows = 0, searchdirection = 1 (fwd)
+	'if not oDwgRst.EOF then
+	CurChild = myRst("Chld")
+	Do While (myRst("Chld") = CurChild) and (not myRst.EOF)
+		if myRst("FileName") <> "" then
+			DwgCount = DwgCount +1
+			PathSplit = Split(myRst("FileName"), "\")
+			NodStr = " -----> " & PathSplit(UBound(PathSplit))
+			Set myNod = tView.Nodes.Add(Lvl , tvwChild, Lvl & "|" & myRst("FileName"), NodStr) 'The node key will consist of the level of the parent and the full file path
+			If myRst("FileMissing") <> 0 Then
+				NodImg = 3
+			else
+				NodImg = 1 'Un-checked box - User will have to check to dump drawings
+			end if
+			myNod.image = NodImg
+		end if
+		myRst.movenext
+		if myrst.eof then exit do
+	Loop
+	AddDrawings = DwgCount 
+End Function 
+
+Function AddDrawingsBottomUp(Mno, Lvl, tView)
+	Dim DwgCount
+	Dim i 
+	Dim myNod
+	Dim NodImg
+	Dim NodStr
+	Dim PathSplit
+	DwgCount = 0
+	'oDwgRst.Filter = "[Mnumber] like '" & Left(mno, Len(mno)-1) & "%'" 'TESTED REMOVING FILTER AND JUST ITERATING ENTIRE DB. Much slower!
+	'Also tested re-querying the database with a where clause.  Also much slower.
+	'oDwgRst.Sort = "[Mnumber] DESC, [FileName]" 'sort was removed here and moved to the original SQL query to drastically reduce processing time.
+	oDwgRst.MoveFirst
+	oDwgRst.Find "[Mnumber] like '" & Left(mno, Len(mno)-1) & "%'", 0, 1 'skiprows = 0, searchdirection = 1 (fwd)
+	if not oDwgRst.EOF then
+	'If oDwgRst.RecordCount > 0 Then
+		do while ucase(left(oDwgRst("Mnumber"),Len(mno)-1)) = ucase(Left(mno, Len(mno)-1))  'when "find" doesn't "find", rst will eof.
+			DwgCount = DwgCount +1
+			PathSplit = Split(oDwgRst("FileName"), "\")
+			NodStr = " -----> " & PathSplit(UBound(PathSplit))
+			'Set myNod = TreeView1.Nodes.Add(Lvl , tvwChild, Lvl & "-" & DwgCount, NodStr)
+			Set myNod = tView.Nodes.Add(Lvl , tvwChild, Lvl & "|" & oDwgRst("FileName"), NodStr) 'The node key will consist of the level of the parent and the full file path
+			If oDwgRst("FileMissing") <> 0 Then
+				NodImg = 3
+			else
+				NodImg = 1 'Un-checked box - User will have to check to dump drawings
+			end if
+			myNod.image = NodImg
+			oDwgRst.movenext
+			if odwgrst.eof then exit do
+			'oDwgRst.Find "[Mnumber] like '" & Left(mno, Len(mno)-1) & "%'", 1, 1 'skiprows = 1 (skip the current record which was just read, searchdirection = 1 (fwd)
+		Loop
+	End If
+	'oDwgRst.Filter = 0
+	AddDrawingsBottomUp = DwgCount 
+End Function 
+
+sub PopulateParents(Pno, Lvl, TopList)
+	dim curItem
+	dim oRst
+	dim sSql
+	Dim myNod
+	Dim nodImg
+	curItem = 1
+	sSql = "Select [MATIX_E_BOM_TREE].OYA_HINBAN, [MATIX_E_BOM_TREE].FUGOH, [MATIX_E_BOM_LIST].ASP_KBN, [MATIX_E_BOM_LIST].HINMEI, [MATIX_E_BOM_LIST].MATSUBI  "
+	sSql = sSql & "from [MATIX_E_BOM_TREE] INNER JOIN [MATIX_E_BOM_LIST] ON [MATIX_E_BOM_TREE].OYA_HINBAN = [MATIX_E_BOM_LIST].HINBAN "
+	sSql = sSql & "WHERE KO_HINBAN = '" & Pno & "' "
+	sSql = sSql & "ORDER BY OYA_HINBAN "
+	set oRst = CreateObject("ADODB.Recordset")
+	dim NodStr
+	oRst.Open sSql, oConn,  3,  1, -1
+	if not oRst.EOF then
+		oRst.MoveLast
+		oRst.MoveFirst
+		while not oRst.EOF
+			NodStr = ""
+			NodStr = NodStr & " (" & oRst("FUGOH") & ") IN " 'Balloon Number
+			NodStr = NodStr & left(oRst("OYA_HINBAN").Value, len(oRst("OYA_HINBAN").Value)-1) & oRst("MATSUBI")
+			NodStr = NodStr & "  " & oRst("HINMEI")
+			Set myNod = TreeView2.Nodes.Add(Lvl , tvwChild, Lvl & "-" & CurItem, NodStr)
+			DwgsFound = AddDrawingsBottomUp(oRst("OYA_HINBAN"), lvl & "-" & curItem, treeview2)
+			If DwgsFound = 0 Then
+				NodImg = 3 'missing
+			Else
+				NodImg = 5 'drawing icon - checkboxes will be added for drawings
+			End If
+			myNod.Image = nodImg 
+			if oRst("ASP_KBN") = "A" then
+				TopList = TopList & oRst("OYA_HINBAN") & ","
+			end if
+			PopulateParents oRst("OYA_HINBAN").Value, Lvl & "-" & CurItem, TopList
+			oRst.MoveNext
+			CurItem = CurItem + 1
+		wend
+	end if
+
+end sub
+
+Sub ClearAssyFilter
+	my_combo.value = ""
+	LoadBox dropdown1, Assys,""
+	my_combo.focus
+End Sub
+
+Sub ClearPartsFilter
+	my_combo2.value = ""
+	LoadBox dropdown2, Parts,""
+	my_combo2.focus
+
+End Sub
+
+Sub FilterAssys
+	LoadBox dropdown1, Assys, my_combo.value
+End Sub
+
+Sub FilterParts
+	LoadBox dropdown2, Parts, my_combo2.value
+End Sub
+
+sub LoadBox(BoxName, myArray, filstr)
+    for i = 1 to BoxName.length
+	BoxName.remove 0
+    next 
+
+	for i = 0 to ubound(myArray,2)
+		if instr(1, myArray(1,i), filstr, 1) > 0 then
+			Set objOption = Document.createElement("OPTION")
+			objOption.text = myArray(1,i)
+			objOption.value = myArray(0,i)
+			BoxName.Add(objOption)
+		end if
+		if BoxName.Length > BoxLimit then
+			Set objOption = Document.createElement("OPTION")
+			objOption.text = "TOO MANY TO COMPLETE LIST"
+			objOption.value = "TOO MANY TO COMPLETE LIST"
+			BoxName.Add(objOption)
+			exit for
+		end if
+	next
+end sub
+
+sub LoadBoxFromArray(BoxName, myArray, FilArray)
+    dim ListSplit
+	dim j
+	for i = 1 to BoxName.length
+		BoxName.remove 0
+    next 
+	for j = 0 to ubound(FilArray)
+		FilStr = FilArray(j)
+		for i = 0 to ubound(myArray,2)
+			if instr(1, myArray(1,i), filstr, 1) > 0 then
+				Set objOption = Document.createElement("OPTION")
+				objOption.text = myArray(1,i)
+				objOption.value = myArray(0,i)
+				BoxName.Add(objOption)
+			end if
+			if BoxName.Length > BoxLimit then
+				Set objOption = Document.createElement("OPTION")
+				objOption.text = "TOO MANY TO COMPLETE LIST"
+				objOption.value = "TOO MANY TO COMPLETE LIST"
+				BoxName.Add(objOption)
+				exit for
+			end if
+		next
+	next
+end sub
+
+sub TreeView1_dblclick
+	'The global object variable "MemoryNode" is set to the selected node by the click event.
+	dim KeySplit
+	If ((MemoryNode.image = 1) or (MemoryNode.Image = 2)) Then 'if image is checked or unchecked box, there is a drawing.
+		KeySplit = Split(MemoryNode.key, "|")
+		Set oShell = CreateObject("Wscript.shell")
+		oShell.run sIviewOrNothing & """" & KeySplit(UBound(KeySplit)) & """", 3, False 
+		Set oShell = nothing
+	End If
+
+end sub
+
+sub TreeView2_dblClick
+	'The global object variable "MemoryNode" is set to the selected node by the click event.
+	Dim KeySplit
+	if memorynode.image = 1 or memorynode.image = 2 Then
+		KeySplit = Split(memoryNode.key, "|")
+		Set oShell = CreateObject("Wscript.shell")
+		oShell.run sIviewOrNothing & """" & KeySplit(UBound(KeySplit)) & """", 3, False 
+		Set oShell = nothing
+	End If
+end sub
+
+sub BrowseButton_onClick()
+	Dim SA, F
+	Dim StartFldr
+	Set SA = CreateObject("Shell.Application")
+	Set oShell = CreateObject("Wscript.shell")
+	If CmbDumpPath.Value = "" then
+		StartFldr = "My Computer\" 'oshell.SpecialFolders("Desktop")
+	else
+		StartFldr = CmbDumpPath.Value
+	End If
+	Set F = SA.BrowseForFolder(0, "Choose a folder", 0, StartFldr)
+	If (Not F Is Nothing) Then
+		cmbDumpPath.value = F.Items.Item.path
+	End If
+	Set F = Nothing
+	Set SA = Nothing
+	Set oShell = nothing
+end sub
+
+sub CustDump_onClick()
+    dim xlApp
+	dim xlBook
+	dim xlSheet
+    dim theNode
+    dim tSplit
+    dim sMsg
+    dim oShell
+    dim i
+    dim CopyFileCount
+	dim MissingCount
+    dim allFiles
+    dim showMissing
+    'First check if the path exists.
+    if cmbdumppath.value = "" then
+		msgbox "You must first specify a directory."
+		exit sub
+	end if
+    if msgbox("Display line in Excel for missing drawings?", vbYesNo, "Show Missing?") = vbYes then
+        showMissing = true
+    else
+        showMissing = false
+    end if
+    if msgbox("Copy drawings? " & vbcrlf & vbcrlf & "Choose ""No"" to create index only. " & vbcrlf & "(Useful if crappy script crashes during XL creation)", vbyesno) = vbyes then
+        set fso = createobject("Scripting.FileSystemObject")
+        if not fso.folderexists(cmbDumpPath.Value) then
+            dim fldCreate
+            fldCreate = msgbox("Folder " & cmbdumppath.value & " does not exist. Create?", vbyesno, "Create folder?")
+            if fldcreate = vbyes then
+                fso.createfolder cmbdumppath.value
+            else
+                exit sub
+            end if
+            if not fso.folderexists(cmbdumppath.value ) then
+                msgbox "Could not create folder: " & cmbdumppath.value 
+                set fso = nothing
+                exit sub
+            end if
+        end if
+        if not fso.folderexists(cmbdumppath.value & "\Drawings" ) then
+            fso.createfolder cmbdumppath.value & "\Drawings"
+            if not fso.folderexists(cmbdumppath.value & "\Drawings" ) then
+                msgbox "Could not create folder: " & cmbdumppath.value & "\Drawings"
+                set fso = nothing
+                exit sub
+            end if 
+        end if
+        sMsg = "Dump all available drawings? " & vbcrlf & vbcrlf & "(""No"" pulls only selected drawings)"
+        if msgbox(sMsg, vbYesNo,"Wanna catch 'em all?") = vbNo then
+            selOnly = true
+        else
+            selOnly = false
+        end if
+        MissingCount = 0
+        CopyFileCount = 0
+        CopyDwgFiles fso, TreeView1.Nodes, cmbdumppath.value & "\Drawings", CopyFileCount, MissingCount, selOnly
+        set oShell = createObject("WScript.Shell")
+        oShell.Popup "Drawing copy complete. Creating Excel file", 5 'Pop up a nice little notice that dismisses after 5 seconds
+    end if
+
+
+    'Now create excel sheet and save in the correct location
+    Set xlApp = CreateObject("Excel.Application")
+    xlApp.Visible = True
+    xlApp.Workbooks.Add
+    Set xlBook = xlApp.Workbooks(xlApp.Workbooks.Count)
+    Set xlsheet = xlBook.Worksheets(1)
+	for i = xlBook.Worksheets.Count to 2 step -1
+		xlBook.Worksheets(i).Delete
+    next 
+    'xlApp.ScreenUpdating = False 'Can't do this due to something about the grouping.  It fails when the sheet is not active and visible.
+    set theNode = TreeView1.nodes(1).root
+    tSplit = split(theNode.Text, "|")
+    xlBook.SaveAs cmbdumppath.value & "\" & tsplit(0) & "-" & tsplit(2) & "-" & tsplit(1) & "-Index",,,,true
+    xlsheet.Name = tSplit(0)
+    xlsheet.cells(1,1) = thenode.Text
+    xlSheet.Range("A1:D1").Merge
+    xlSheet.cells(3,1) = "#"
+    xlSheet.cells(3,2) = "Qty"
+    xlsheet.cells(3,3) = "Part No"
+    xlsheet.cells(3,4) = "Name"    
+    xlsheet.cells(3,5) = "Drawing"
+    xlsheet.Cells(3,6) = "Missing"
+    xlsheet.cells(4,3) = tsplit(0)
+    xlsheet.cells(4,4) = tsplit(2)
+    i = 5
+    if not theNode.child is Nothing then
+        set theNode = theNode.child
+        processNode theNode, xlSheet, i, selOnly, showMissing
+    end if
+    for each xlSheet in xlBook.Worksheets
+        xlSheet.Cells.EntireColumn.AutoFit
+    next
+    xlBook.Worksheets(1).Activate
+    xlbook.Save
+    msgbox "Compleat to creation the indexing file"
+End Sub
+
+sub processNode(theNode,xlSheet, i, selOnly, showMissing)
+    dim keySplit
+    dim mNo
+    dim otherSheet
+    dim bFound
+    dim nuSht
+    dim wasFab
+    dim notDwg
+    dim curLine
+    dim j
+    while not theNode is nothing
+        xlSheet.Activate
+        keySplit = split(theNode.Text, "|")
+        wasFab = false 
+        if ubound(keySplit) = 4 then
+            xlSheet.cells(i,1) = keySplit(1)
+            xlSheet.cells(i,2) = keySplit(3)
+            xlsheet.cells(i,3) = keysplit(2)
+            xlsheet.cells(i,4) = keysplit(4)
+            mNo = trim(keySplit(2))
+            if left(mNo,1) = "M" then
+                if len(mNo) = 11 then
+                    if IsNumeric(right(mNo, 10)) then
+                        'This is a fab part or subassembly.  Add its drawings.
+                        curLine = i 'We have to save the current line because later we add hyperlink if it was subassembly
+                        if not theNode.Child is nothing then
+                            set chldNode = theNode.Child
+                            while not chldNode is nothing
+                                if chldNode.Image = 2 or ((not selOnly) and (chldNode.Image = 1)) then'checked box or select all
+                                    i = i + 1
+                                    xlSheet.cells(i,5) = right(chldNode.Text, len(chldNode.Text) - 8)
+                                    xlSheet.Hyperlinks.Add xlSheet.Cells(i,5), "Drawings\" & xlSheet.Cells(i,5)
+                                elseif showMissing and chldNode.Image = 3 and (left(chldNode.text, 8) = " -----> ") then
+                                    i = i + 1
+                                    xlSheet.cells(i,5) = right(chldNode.Text, len(chldNode.Text) - 8)
+                                    xlSheet.Cells(i,6) = "X"
+                                end if
+                                set chldNode = chldNode.next
+                            wend
+                        end if
+                        if i > curLine then
+                            'msgbox "collapsing row" & i
+                            xlSheet.Rows(curLine + 1 & ":" & i).Group
+                            on error resume next 'This line says "ignore errors"
+                            xlsheet.Rows(i).ShowDetail = false 'This line causes errors for some reason sometimes. 
+                            on error goto 0 'This line says "OK, look at errors again"
+                            xlsheet.Outline.SummaryRow = 0 'xlAbove This allows expand/collapse of drawings
+                        end if
+                        if left(right(mNo, 3), 2) = "00" then
+                            'This is an assembly.  Look for it in the sheet tabs.
+                            'If it is found, it means that this subassembly has already been processed. No need to process.
+                            bFound = False 
+                            for each otherSheet in xlSheet.parent.worksheets
+                                if otherSheet.Name = mNo then
+                                    bFound = true
+                                    exit for
+                                end if
+                            next
+                            if not bFound then
+                                'Sheet does not yet exist for this one. Process as an assembly.
+                                'Create a sheet for it, and pass the node to ProcessNode recursively
+                                set nuSht = xlSheet.parent.worksheets.add(,xlsheet.parent.worksheets(xlsheet.parent.worksheets.count))
+                                nuSht.name = mno
+                                nuSht.Range("A1:D1").Merge
+                                nuSht.cells(1,1) = theNode.Text
+                                nuSht.cells(3,1) = "#"
+                                nuSht.cells(3,2) = "Qty"
+                                nuSht.cells(3,3) = "Part No"
+                                nuSht.cells(3,4) = "Name"   
+                                nuSht.cells(3,5) = "Drawing"
+                                nuSht.Cells(3,6) = "Missing"
+                                nuSht.Cells(4,3) = keysplit(2)
+                                nuSht.Cells(4,4) = keySplit(4)
+                                'Create a hyperlink to the appropriate sheet
+                                xlSheet.Hyperlinks.Add xlSheet.Cells(curLine,3), "", nuSht.Name & "!A1"
+                                j = 5
+                                if not theNode.Child is nothing then
+                                    set theChild = theNode.Child
+                                    processNode theChild, nuSht, j, selOnly, showMissing
+                                end if
+                            end if
+                        end if
+                    end if
+                end if
+            end if  
+        else 'uBound was not 4, therefore this node is a drawing.
+            if theNode.Image = 2 or ((not selOnly) and (theNode.Image = 1)) then'checked box or select all
+                xlSheet.cells(i,5) = right(theNode.Text, len(theNode.Text) - 8)
+                xlSheet.Hyperlinks.Add xlSheet.Cells(i,5), "Drawings\" & xlSheet.Cells(i,5)
+            elseif showMissing and theNode.Image = 3 and (left(theNode.text, 8) = " -----> ") then
+                xlSheet.cells(i,5) = right(theNode.Text, len(theNode.Text) - 8)
+                xlSheet.Cells(i,6) = "X"
+            end if
+        end if
+        i = i + 1
+        set theNode = theNode.next
+    wend
+end sub
+
+sub GetFileInfo()
+	'The global object variable "MemoryNode" is set to the selected node by the click event. Could be in TreeView1 or 2.
+	'Nodes corresponding to drawings are made up of a node level, then a pipe (|) then the file path.
+	'This routine looks up the drawing file in the DB and reports its status.
+	dim KeySplit
+	dim InfoMsg
+	dim ShowInFolder
+	if MemoryNode is nothing then
+		MsgBox "You have to tell me what file you want info about. Click one."
+		exit sub
+	elseif instr(memorynode.key, "|") = 0 then 'if no | in the key, the selected node wasn't a drawing node.
+		MsgBox "You didn't pick a drawing"
+		exit sub
+	end if
+	KeySplit = Split(MemoryNode.Key, "|")
+	oDwgRst.Filter = 0
+	oDwgRst.MoveFirst
+	oDwgRst.Find "[FileName] = '" & KeySplit(ubound(keysplit)) & "'", , , 1
+	if oDwgRst.EOF then
+		msgbox "Could not find " & KeySplit(ubound(KeySplit)) & " in the database!"
+		exit sub
+	end if
+	InfoMsg = "M-Number: " & oDwgRst("Mnumber") & vbcrlf & "Added to DB on " & oDwgRst("DateAdd")
+	if oDwgRst("FileMissing").value = -1 then
+		InfoMsg = InfoMsg & vbcrlf & "File discovered to be missing during DB update on " & oDwgRst("DateMissing")
+	end if
+	InfoMsg = InfoMsg & vbcrlf & vbcrlf & "You can copy the file path below using Ctrl+C"
+	if oDwgRst("FileMissing").value <> -1 then
+		InfoMsg = InfoMsg & vbcrlf & vbcrlf & "To show the file in the folder, click ""OK""."
+	end if
+	ShowInFolder = inputbox(InfoMsg, "File Information", oDwgRst("FileName"))
+	if (ShowInFolder = oDwgRst("FileName")) and (-1 <> oDwgRst("FileMissing").value) then 'The user clicked "OK" to show in place.
+		'Open explorer
+		set myShell = createobject("WScript.Shell")
+		myShell.run "explorer.exe /select, """ & oDwgRst("FileName") & """"
+		set myshell = nothing
+	end if
+end sub
+
+Sub Select_Childs()
+	'The global object variable "MemoryNode" is set to the selected node by the click event. Could be in TreeView1 or 2.
+	'Nodes corresponding to drawings are made up of a node level, then a pipe (|) then the file path.
+	'This routine selects every drawing that is at or below the selected node.
+	dim KeySplit
+	dim InfoMsg
+	if MemoryNode is nothing then
+		MsgBox "You have to pick a line. Click one."
+		exit sub
+	end if
+	dim NoDwgCount
+	dim TotSelects
+	dim theNode
+	TotSelects = 0
+	NoDwgCount = 0
+	for each theNode in TreeView1.Nodes
+		if instr(theNode.key, MemoryNode.key) > 0 then
+			if theNode.Image = 1 then'Unchecked box
+				theNode.Image = 2 'checked box
+				TotSelects = TotSelects + 1
+			elseif theNode.Image = 3 then 'missing
+				NoDwgCount = NoDwgCount + 1
+			elseif theNode.Image = 2 then 'already checked box (just add to total)
+				totselects = totselects + 1
+			end if
+		end if
+	next
+	
+	msgbox "Total drawings selected: " & totselects & vbcrlf & "Drawings missing: " & NoDwgCount
+end sub
+
+sub Select_All()
+	dim NoDwgCount
+	dim TotSelects
+	dim theNode
+	TotSelects = 0
+	NoDwgCount = 0
+	for each theNode in TreeView1.Nodes
+		if theNode.Image = 1 then'Unchecked box
+			theNode.Image = 2 'checked box
+			TotSelects = TotSelects + 1
+		elseif theNode.Image = 3 then 'missing
+			NoDwgCount = NoDwgCount + 1
+		elseif theNode.Image = 2 then 'already checked box (just add to total)
+			totselects = totselects + 1
+		end if
+	next
+	
+	msgbox "Total drawings selected: " & totselects & vbcrlf & "Drawings missing: " & NoDwgCount
+	
+end sub
+
+sub Clear_All()
+	dim theNode
+	for each theNode in TreeView1.Nodes
+		if theNode.Image = 2 then'checked box
+			theNode.Image = 1 'Unchecked box
+		end if
+	next
+end sub
+
+sub DumpButton_onClick()
+	if cmbdumppath.value = "" then
+		msgbox "You must first specify a directory."
+		exit sub
+	end if
+	set fso = createobject("Scripting.FileSystemObject")
+	if not fso.folderexists(cmbDumpPath.Value) then
+		dim fldCreate
+		fldCreate = msgbox("Folder " & cmbdumppath.value & " does not exist. Create?", vbyesno, "Create folder?")
+		if fldcreate = vbyes then
+			fso.createfolder cmbdumppath.value
+		end if
+		if not fso.folderexists(cmbdumppath.value) then
+			msgbox "Could not create folder: " & cmbdumppath.value
+			set fso = nothing
+			exit sub
+		end if
+	end if
+	dim CopyFileCount
+	dim MissingCount
+	MissingCount = 0
+	CopyDwgFiles fso, TreeView1.Nodes, cmbdumppath.value, CopyFileCount, MissingCount, True
+	CopyDwgFiles fso, TreeView2.Nodes, cmbdumppath.value, CopyFileCount, MissingCount, True
+	set fso = nothing
+	msgbox "File copy complete. " & CopyFileCount & " files copied. Any duplicate filenames were overwritten." & vbcrlf & MissingCount & " files were in DB but not found in the folder."
+	dim SA
+	Set SA = CreateObject("Shell.Application")
+	SA.Explore cmbdumppath.value
+	set sa = nothing
+end sub
+
+sub EmailButton_onClick()
+	set fso = createobject("Scripting.FileSystemObject")
+	dim CopyFileCount
+	dim MissingCount
+	dim PathDict
+	dim TotalSize
+	dim myResp
+	MissingCount = 0
+	set PathDict = CreateObject("Scripting.Dictionary")
+	TotalSize = 0 
+	CopyPaths fso, TreeView1.Nodes, PathDict, CopyFileCount, MissingCount, TotalSize
+	CopyPaths fso, TreeView2.Nodes, PathDict, CopyFileCount, MissingCount, TotalSize
+	set fso = nothing
+	if CopyFileCount < 1 then
+		msgbox "Nothing selected to attach."
+		myResp = 0
+	else
+		myResp = msgbox(CopyFileCount & " files selected for email with total size of " & round(TotalSize / 1024 / 1024, 1) & " MB. Continue with attachment?", 32 + 4) 'vbQuestion + vbYesNo
+	end if
+	if myResp = 6 then '6=vbYes
+		msgbox "Attaching..."
+		Dim Notes' As Object
+		Dim Maildb' As Object
+		Dim objNotesDocument' As Object
+		Dim objNotesField' As Object
+		Dim i
+		Set Notes = CreateObject("Notes.NotesSession")
+		Set Maildb = Notes.GETDATABASE("", "")
+		Maildb.OPENMAIL
+		Set objNotesDocument = Maildb.CREATEDOCUMENT
+		'Set objNotesField = objNotesDocument.APPENDITEMVALUE("Subject", "Test Subject")
+		'Set objNotesField = objNotesDocument.APPENDITEMVALUE("SendTo", "Josh Brady")
+		Set objNotesField = objNotesDocument.CREATERICHTEXTITEM("Body")
+		'here's the attaching bit
+		for i = 1 to PathDict.Count
+			objNotesField.EMBEDOBJECT 1454, "", PathDict.item(i)
+		next
+		Call objNotesField.APPENDTEXT(myBody)
+		'Call objNotesDocument.REPLACEITEMVALUE("Body", "I tried to attach a file!")
+		Set WorkSpace = CreateObject("Notes.NotesUIWorkspace")
+		Call WorkSpace.EDITDOCUMENT(True, objNotesDocument)
+	end if
+end sub
+
+Sub XLBomButton_onClick()
+	'This sub exports the BOM from MATIX to the Excel template.
+	Dim Mno
+	dim oRst
+	dim oRst2
+	dim sSql	
+	dim xlApp
+	dim xlBook
+	dim xlSheet
+	Const ExcelTempPath = "M:\MATIX-BOM\MATIX2-BOM-System\Matix2-Engeneering_BOM For Engineering system.xls"
+	Const xlSkipRows = 4
+	Const xlHeaderRow = 3
+	Const xlBalloon = 1
+	Const xlBlank0 = 2
+	Const xlFabNo = 3
+	Const xlPurNo = 4
+	Const xlDesc = 5
+	Const xlQty = 6
+	Const xlUnit = 7
+	Const xlASP = 8
+	Const xlSize = 9
+	Const xlShtQty = 10
+	Const xlBlank1 = 11
+	Const xlBlank2 = 12
+	Const xlBlank3 = 13
+	Const xlModify = 14
+	Const xlIsDMS = 15
+	Const xlMaker = 16
+	Const xlCostCode = 17
+	Const xlRemarks = 18
+	if not (MemoryNode is Nothing) Then 'First make sure a node is selected
+		dim tmpArray
+		tmpArray = split(MemoryNode.Text, "|")  'Split text into pieces to get M number. 
+		if ubound(tmpArray) > 1 then 'If the selected node is a drawing, it will not contain "|", 
+			Mno = trim(tmpArray(2)) 'The third item (index 2) of the array should now be a valid M-number
+			if left(Mno,1) = "M" then
+				if len(Mno) = 11 then
+					if IsNumeric(right(Mno, 10)) then
+						'This is probably a fab part or assembly...  Strip last digit and add "0" since all HINBAN end in 0.
+						Mno = Left(Mno, 10) & "0"
+					end if
+				end if
+			end if
+			sSql = "Select [MATIX_E_BOM_TREE].KO_HINBAN, [MATIX_E_BOM_TREE].FUGOH, [MATIX_E_BOM_LIST].ASP_KBN, [MATIX_E_BOM_LIST].HINMEI, "
+			sSql = sSql & "[MATIX_E_BOM_LIST].YOBI_KATASHIKI, [MATIX_E_BOM_TREE].SURYO, [MATIX_E_BOM_TREE].BUHINHYO_TANI, [MATIX_E_BOM_LIST].MATSUBI, "
+			sSql = sSql & "[MATIX_E_BOM_LIST].ZUMEN_SIZE, [MATIX_E_BOM_LIST].NAIYOH_CODE, [MATIX_E_BOM_TREE].BIKOH, [MATIX_E_BOM_LIST].SHEET_SU, "
+			sSql = sSql & "[MATIX_E_BOM_LIST].TUIKAKOH_KBN, [MATIX_E_BOM_LIST].MAKER_CODE, [MATIX_E-BOM_MAKER].MakerName "
+			sSql = sSql & "from [MATIX_E_BOM_TREE] INNER JOIN [MATIX_E_BOM_LIST] ON [MATIX_E_BOM_TREE].KO_HINBAN = [MATIX_E_BOM_LIST].HINBAN "
+			sSql = sSql & "LEFT OUTER JOIN [MATIX_E-BOM_MAKER] ON [MATIX_E_BOM_LIST].MAKER_CODE = [MATIX_E-BOM_MAKER].MakerCode "
+			sSql = sSql & "WHERE OYA_HINBAN = '" & Mno & "' "
+			sSql = sSql & "ORDER BY ASP_KBN DESC, FUGOH"
+			cmbdumppath.value = ssql
+			set oRst = CreateObject("ADODB.Recordset")
+			oConn.open 'Connection has been previously defined, but should be closed at this point
+			oRst.Open sSql, oConn,  3,  1, -1
+			if not oRst.EOF then
+				orst.movelast
+				orst.movefirst
+				Set xlApp = CreateObject("Excel.Application")
+				xlApp.Visible = True
+				xlApp.Workbooks.Open ExcelTempPath
+				Set xlBook = xlApp.Workbooks(xlApp.Workbooks.Count)
+				Set xlsheet = xlBook.Worksheets(1)
+				dim i
+				i=1
+				xlSheet.Cells(i + xlSkipRows, xlDesc).Value = "Exporting from MATIX.... Please wait...."
+				xlApp.ScreenUpdating = False
+				while not orst.eof
+				    xlsheet.Cells(i + xlSkipRows, xlBalloon).Value = oRst("FUGOH")
+					if LEFT(oRst("KO_HINBAN"),1) = "M" then
+						xlsheet.Cells(i + xlSkipRows, xlFabNo).Value = left(oRst("KO_HINBAN"), len(oRst("KO_HINBAN"))-1) & oRst("MATSUBI")
+					else
+						xlsheet.Cells(i + xlSkipRows, xlFabNo).Value = oRst("KO_HINBAN")
+					end if
+					xlsheet.Cells(i + xlSkipRows, xlPurNo).Value = oRst("YOBI_KATASHIKI")
+					xlsheet.Cells(i + xlSkipRows, xlDesc).Value = oRst("HINMEI")
+					xlsheet.Cells(i + xlSkipRows, xlQty).Value = oRst("SURYO")
+					xlsheet.Cells(i + xlSkipRows, xlUnit).Value = oRst("BUHINHYO_TANI")
+					xlsheet.Cells(i + xlSkipRows, xlASP).Value = oRst("ASP_KBN")
+					xlsheet.Cells(i + xlSkipRows, xlSize).Value = oRst("ZUMEN_SIZE")
+					xlsheet.Cells(i + xlSkipRows, xlShtQty).Value = oRst("SHEET_SU")
+					xlsheet.Cells(i + xlSkipRows, xlModify).Value = oRst("TUIKAKOH_KBN")
+					xlsheet.Cells(i + xlSkipRows, xlMaker).Value = oRst("MakerName") 
+					if oRst("TUIKAKOH_KBN") = 1 Then
+						'we need to get name and vendor info for the Z number that's in YOBI_KATASHIKI. Just overwrite whatever was there in XL sheet
+						set oRst2 = CreateObject("ADODB.Recordset")
+						sSql = "Select [MATIX_E_BOM_LIST].YOBI_KATASHIKI, [MATIX_E_BOM_LIST].MAKER_CODE, [MATIX_E-BOM_MAKER].MakerName "
+						sSql = sSql & "FROM [MATIX_E_BOM_LIST] "
+						sSql = sSql & "LEFT OUTER JOIN [MATIX_E-BOM_MAKER] ON [MATIX_E_BOM_LIST].MAKER_CODE = [MATIX_E-BOM_MAKER].MakerCode "						
+						sSql = sSql & "WHERE HINBAN = '" & oRst("YOBI_KATASHIKI") & "' "
+						'cmbdumppath.value = ssql
+						oRst2.open sSql, oConn, 3, 1, -1
+						xlsheet.Cells(i + xlSkipRows, xlPurNo).Value = oRst2("YOBI_KATASHIKI")
+						xlsheet.Cells(i + xlSkipRows, xlMaker).Value = oRst2("MakerName")
+						set oRst2 = nothing
+					end if
+					'xlsheet.Cells(i + xlSkipRows, xlIsDMS).Value = "1"  'HAVE NOT FOUND DMS FLAG YET
+					xlsheet.Cells(i + xlSkipRows, xlCostCode).Value = oRst("NAIYOH_CODE")
+					xlsheet.Cells(i + xlSkipRows, xlRemarks).Value = oRst("BIKOH")
+					i=i+1
+					oRst.MoveNext
+				wend
+				'Now we need the info for the assembly for the header
+				sSql = "Select [MATIX_E_BOM_LIST].HINBAN, [MATIX_E_BOM_LIST].ASP_KBN, [MATIX_E_BOM_LIST].HINMEI, "
+				sSql = sSql & "[MATIX_E_BOM_LIST].MATSUBI, "
+				sSql = sSql & "[MATIX_E_BOM_LIST].ZUMEN_SIZE, [MATIX_E_BOM_LIST].SHEET_SU "
+				sSql = sSql & "from [MATIX_E_BOM_LIST] "
+				sSql = sSql & "WHERE HINBAN = '" & Mno & "' "
+				set orst = nothing 
+				set orst = CreateObject("ADODB.Recordset")
+				'cmbdumppath.value = ssql
+				orst.open ssql, oconn, 3, 1, -1
+				xlsheet.Cells(xlHeaderRow, 3).Value = left(Mno, len(Mno)-1) & oRst("MATSUBI")
+				xlsheet.Cells(xlHeaderRow, 5).Value = oRst("HINMEI")
+				xlsheet.Cells(xlHeaderRow, 8).Value = oRst("ASP_KBN")
+				xlsheet.Cells(xlHeaderRow, 9).Value = oRst("ZUMEN_SIZE")
+				xlsheet.Cells(xlHeaderRow, 10).Value = oRst("SHEET_SU")
+				xlApp.ScreenUpdating = true
+				MSGBOX "Compleat to export the BOM. Split drawing issue is completed?"
+			else
+				msgbox "no records returned"
+			end if
+			set orst = nothing
+			oconn.close
+		end if
+	else
+		msgbox "Please select subassembly in the tree."
+	end if
+end sub
+
+sub CopyDwgFiles(myFso, theNodes, theDest, CopyFileCount, MissingFileCount, selOnly)
+	dim KeySplit
+	dim DwgPath
+	dim theNode
+	for each theNode in theNodes
+		if theNode.Image = 2 or ((not selOnly) and theNode.Image = 1) then'checked box or select all
+			KeySplit = split(theNode.key, "|")
+			DwgPath = keysplit(ubound(keysplit))
+			if not right(theDest,1) = "\" then
+				theDest = theDest & "\"
+			end if
+			'msgbox "Copy " & vbcrlf  & dwgpath & vbcrlf & "to" & vbcrlf & thedest
+			if myFso.FileExists(dwgpath) then
+				myFso.copyfile dwgpath, theDest
+				CopyFileCount = CopyFileCount + 1
+			else
+				MissingFileCount = MissingFileCount + 1
+			end if
+		end if
+	next
+	
+end sub
+
+sub CopyPaths(myFso, theNodes, theDict, CopyFileCount, MissingFileCount, SizeTot)
+	dim KeySplit
+	dim DwgPath
+	dim theNode
+	dim myFile
+	for each theNode in theNodes
+		if theNode.Image = 2 then'checked box
+			KeySplit = split(theNode.key, "|")
+			DwgPath = keysplit(ubound(keysplit))
+			if myFso.FileExists(dwgpath) then
+				theDict.Add theDict.Count + 1, DwgPath
+				CopyFileCount = CopyFileCount + 1
+				set myFile = myFSO.GetFile(DwgPath)
+				SizeTot = SizeTot + myFile.Size
+				set myFile = nothing
+			else
+				MissingFileCount = MissingFileCount + 1
+			end if
+		end if
+	next
+	
+end sub
+
+sub SrchMatix
+	dim PartNo
+	dim myOpt
+	Dim myNode
+	Dim myXL
+	'Get the part number of the selected line
+	for each myopt in dropdown2.options
+		if myopt.selected then
+			PartNo = myopt.text
+			exit for
+		end if
+	next
+	if len(PartNo) < 1 then
+		msgbox "Nothing was selected."
+		exit sub
+	end if
+	PartNo = trim(left(partno,instr(partno," | ")))
+	set myXL = createobject("Excel.Application")
+	myXL.Visible = true
+	myXL.EnableEvents = False
+	myXL.Workbooks.Open MatixChkPath
+	myXL.EnableEvents = True
+	myXL.Run "ThisWorkbook.GetMATIX_info", PartNo
+	myXL.UserControl = True
+end sub
+
+Function Get1OpenArg()
+	'This function will parse the command line used to run this HTA file. The purpose is to pass a starting machine
+	'M-number from a calling program, such as the JobFinder tool. Expects the command line to be formatted with 
+	'double quotes around the arguments. Returns only the first argument.  Because I am lazy right now.
+	'For additional documentation, please see:
+	'http://blogs.technet.com/b/heyscriptingguy/archive/2005/04/20/how-can-i-pass-command-line-variables-to-an-hta-when-it-starts.aspx
+	dim CmdString
+	dim CmdSplit
+	Get1OpenArg = ""
+	CmdString = BOMBrowse.commandLine
+	CmdSplit = Split(CmdString, chr(34))
+	if ubound(CmdSplit) > 2 then
+		Get1OpenArg = CmdSplit(3)
+	end if
+end function
+
+sub FixRegistryDataAccess
+	'Changes security option for internet zone to "allow" in order to access the NAMT Sql Server
+	dim WSHShell
+	dim strRegKey
+	dim WriteType
+	Set WSHShell = CreateObject("WScript.Shell") 
+	
+	strRegKey = "HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\3\1406"
+	if WSHShell.RegRead(strRegKey) <> 0 then
+		MsgBox "Allowing data access across domains..."
+		WriteType = "REG_DWORD"
+		WSHShell.RegWrite strRegKey, 0, WriteType
+		'WScript.Echo "Install setting is " & WSHShell.RegRead(strRegKey) 
+	end if
+end sub
+
+'*******************
+'Log File Initialization function (returns "False" if log fails to open)
+Function InitLog()
+	'Log File Initialization sub
+	'(run at beginning of first sub)
+	'Will open log file, and return success or failure.
+	InitLog = True
+	Set LogFSO = CreateObject("Scripting.FileSystemObject")
+	if Not LogFSO.FolderExists(LogLoc) then
+		MsgBox "Folder " & LogLoc & " not found. Can't log."
+		InitLog = False
+	else
+		Set LogFile = LogFSO.OpenTextFile(LogLoc & LogName, ClearEachRun, true)
+		If LogFile Is Nothing Then
+			MsgBox "Could not open log file " & LogLoc & LogName & " Unable to log."
+			InitLog = False
+		end if
+	end if
+End Function
+'Log File appender
+Sub LogIt(Msg, TS)
+	'If TS is 1, put a time stamp at the beginning. If 2, use Timer. Otherwise, no time stamp.
+	if bLog then
+		if TS = 1 Then
+			Msg = now() & "  " & Msg
+		elseif TS = 2 then
+			Msg = Timer - TimeIt & "  " & Msg
+		end if
+		if not LogFile is nothing then
+			LogFile.WriteLine Msg
+		end if
+	end if
+end sub
+'Log File Show
+sub ShowIt
+	'Just open the log file with the default text editor
+	dim myShell
+	set myShell = createobject("Wscript.shell")
+	myShell.Run LogLoc & LogName
+	set myShell = Nothing
+end sub
+'End of log file code
+'*******************
+</SCRIPT>
+
+<BODY>
+
+<body 
+ style = "font:14 pt arial; color:black">
+
+<P><P>
+Filter (Top Down):
+<input id=AssyFilter class="combo" type="combo" value="" name="my_combo" onKeyUp="FilterAssys">
+<input id=AssyFilterClearBtn class="button" type="button" value="Clear Filter" name="AssyClrBtn" onClick="ClearAssyFilter">
+<input id=BrowseButton class="button" type="button" value="Select Dir" name="BrowseButton">
+<input id=cmbDumpPath class="combo" type="combo" value="" name="DwgDumpPath_combo" style="WIDTH: 400px">
+<input id=DumpButton class="button" type="button" value="Dump Dwgs" name="DumpButton">
+<input id=EmailButton class="button" type="button" value="Email Dwgs" name="EmailButton">
+<input id=XLBom class="button" type="button" value="BOMExcel" name="XLBomButton">
+<input id=CustDump class="button" type="button" value="Customer Dwgs" name="CustDump">
+
+&nbsp;&nbsp;&nbsp;
+<p><P>
+
+<select size="20" width="200" name="DropDown1" OnChange="AssyExpand">
+
+</select>
+
+<OBJECT id=TreeView1 style="WIDTH: 620px; HEIGHT: 321px"
+classid=clsid:C74190B6-8589-11D1-B16A-00C0F0283628 VIEWASTEXT>
+<PARAM NAME="_ExtentX" VALUE="5821">
+<PARAM NAME="_ExtentY" VALUE="6588">
+<PARAM NAME="_Version" VALUE="393217">
+<PARAM NAME="HideSelection" VALUE="1">
+<PARAM NAME="Indentation" VALUE="1000">
+<PARAM NAME="LabelEdit" VALUE="1">
+<PARAM NAME="LineStyle" VALUE="1">
+<PARAM NAME="PathSeparator" VALUE="\">
+<PARAM NAME="Sorted" VALUE="0">
+<PARAM NAME="Style" VALUE="7">
+<PARAM NAME="Checkboxes" VALUE="0">
+<PARAM NAME="FullRowSelect" VALUE="0">
+<PARAM NAME="HotTracking" VALUE="0">
+<PARAM NAME="Scroll" VALUE="1">
+<PARAM NAME="SingleSel" VALUE="0">
+<PARAM NAME="ImageList" VALUE="">
+<PARAM NAME="BorderStyle" VALUE="0">
+<PARAM NAME="Appearance" VALUE="1">
+<PARAM NAME="MousePointer" VALUE="0">
+<PARAM NAME="Enabled" VALUE="1">
+<PARAM NAME="OLEDragMode" VALUE="0">
+<PARAM NAME="OLEDropMode" VALUE="0">
+</OBJECT>
+
+<P align=right>
+<span id="AssyBusyLabel"></span>
+<input id="chkOneClickBrowse" type="checkbox" name="chkOneClickBrowse">Enable one-click drawing view 
+<input id=GetInfo style="align: right;" class="button" type="button" value="File Info" name="btnInfo" onClick="GetFileInfo">
+<input id=SelAll style="align: right;" class="button" type="button" value="Select All" name="Sel_All" onClick="Select_All">
+<input id=SelChilds style="align: right;" class="button" type="button" value="Select Chilluns" name="Sel_Childs" onClick="Select_Childs">
+<input id=ClrAll style="align: right;" class="button" type="button" value="Clear All" name="Clr_All" onClick="Clear_All">
+<P>
+<hr>
+<P>
+
+<P><P>
+Filter (Bottom Up):
+<input id=PartFilter class="combo" type="combo" value="" name="my_combo2" onKeyUp="FilterParts">
+<input id=PartsClearBtn class="button" type="button" value="Clear Filter" name="PartsClrBtn" 
+onClick="ClearPartsFilter">
+<input id=SearchMatixBtn class="button" type="button" value="Search Matix for Selected Part" name="SearchMatixBtn" 
+onClick="SrchMatix">
+<input id=Closebutton2 class="button" type="button" value="Close" name="Close_button2" 
+onClick="CloseMe">
+&nbsp;&nbsp;&nbsp;
+<p><P>
+
+<select size="20" width="200" name="DropDown2" OnChange="PartsExpand">
+
+</select>
+
+<OBJECT id=TreeView2 style="WIDTH: 620px; HEIGHT: 321px"
+classid=clsid:C74190B6-8589-11D1-B16A-00C0F0283628 VIEWASTEXT>
+<PARAM NAME="_ExtentX" VALUE="5821">
+<PARAM NAME="_ExtentY" VALUE="6588">
+<PARAM NAME="_Version" VALUE="393217">
+<PARAM NAME="HideSelection" VALUE="1">
+<PARAM NAME="Indentation" VALUE="1000">
+<PARAM NAME="LabelEdit" VALUE="1">
+<PARAM NAME="LineStyle" VALUE="1">
+<PARAM NAME="PathSeparator" VALUE="\">
+<PARAM NAME="Sorted" VALUE="0">
+<PARAM NAME="Style" VALUE="7">
+<PARAM NAME="Checkboxes" VALUE="0">
+<PARAM NAME="FullRowSelect" VALUE="0">
+<PARAM NAME="HotTracking" VALUE="0">
+<PARAM NAME="Scroll" VALUE="1">
+<PARAM NAME="SingleSel" VALUE="0">
+<PARAM NAME="ImageList" VALUE="">
+<PARAM NAME="BorderStyle" VALUE="0">
+<PARAM NAME="Appearance" VALUE="1">
+<PARAM NAME="MousePointer" VALUE="0">
+<PARAM NAME="Enabled" VALUE="1">
+<PARAM NAME="OLEDragMode" VALUE="0">
+<PARAM NAME="OLEDropMode" VALUE="0">
+</OBJECT>
+<OBJECT id=ImageList1 classid=clsid:2C247F23-8591-11D1-B16A-00C0F0283628 VIEWASTEXT>
+<PARAM NAME="_ExtentX" VALUE="1005">
+<PARAM NAME="_ExtentY" VALUE="1005">
+<PARAM NAME="BackColor" VALUE="-2147483643">
+<PARAM NAME="ImageWidth" VALUE="20">
+<PARAM NAME="ImageHeight" VALUE="20">
+<PARAM NAME="MaskColor" VALUE="12632256">
+<PARAM NAME="UseMaskColor" VALUE="-1">
+<PARAM NAME="_Version" VALUE="393216">
+</OBJECT>
+
+</BODY>

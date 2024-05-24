@@ -1,0 +1,42 @@
+
+BOM_SQL_STRING_PRE = (
+    "WITH myCTE (Parent, Chld, Balloon, ASP, \n"
+    "Name, PurNo, Qty, Rev, Level, Path) \n"
+    'AS (\n'
+    'SELECT cast(\'\' as nvarchar(20)) AS Parent, \n'
+    'list.HINBAN AS Chld, \n'
+    'cast(\'\' as nvarchar(3)) as Balloon, \n'
+    'list.ASP_KBN as ASP, \n'
+    'list.HINMEI as Name, \n'
+    'list.YOBI_KATASHIKI as PurNo, \n'
+    'cast(0 as decimal(10,5)) as Qty, \n'
+    'list.MATSUBI as Rev, \n'
+    '0 as Level, \n'
+    'cast(\'\' as nvarchar(200)) as Path \n'
+    'FROM MATIX_E_BOM_LIST AS list \n'
+    'WHERE list.HINBAN = \''
+    )
+
+BOM_SQL_STRING_POST = (
+    '\' UNION ALL \n'
+    'SELECT tree.OYA_HINBAN as Parent, \n'
+    'tree.KO_HINBAN AS Chld, \n'
+    'tree.FUGOH AS Balloon, \n'
+    'list.ASP_KBN as ASP, \n'
+    'list.HINMEI as Name, \n'
+    'list.YOBI_KATASHIKI as PurNo, \n'
+    'cast(tree.SURYO as decimal(10,5)) as Qty, \n'
+    'list.MATSUBI as Rev, \n'
+    'Level + 1, cast((Path + tree.OYA_HINBAN + ISNULL(tree.FUGOH,\'000\')) as nvarchar(200)) \n'
+    'FROM MATIX_E_BOM_TREE AS tree \n'
+    'INNER JOIN MATIX_E_BOM_LIST AS list \n'
+    'ON tree.KO_HINBAN = list.HINBAN \n'
+    'INNER JOIN myCTE AS c \n'
+    'ON tree.OYA_HINBAN = c.Chld \n'
+    ') \n'
+    'SELECT myCTE.*, FileIndex.* \n'
+    'FROM myCTE \n'
+    'LEFT JOIN FileIndex \n'
+    'ON myCTE.Chld = FileIndex.Mnumber \n'
+    'ORDER BY Path, Balloon, FileName; \n'
+    )
