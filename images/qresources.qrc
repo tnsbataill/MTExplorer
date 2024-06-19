@@ -1,0 +1,9 @@
+<RCC>
+  <qresource prefix="icons">
+    <file>Assembly.png</file>
+    <file>Drawing.png</file>
+    <file>Info.png</file>
+    <file>Part.png</file>
+    <file>purch.png</file>
+  </qresource>
+</RCC>

@@ -15,9 +15,11 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QHeaderView,
-    QLabel, QMainWindow, QMenuBar, QSizePolicy,
-    QStatusBar, QTreeWidget, QTreeWidgetItem, QWidget)
+from PySide6.QtWidgets import (QApplication, QComboBox, QHeaderView, QLabel,
+    QMainWindow, QPlainTextEdit, QPushButton, QSizePolicy,
+    QStatusBar, QTabWidget, QTreeWidget, QTreeWidgetItem,
+    QWidget)
+import images.qresources_rc
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
@@ -26,47 +28,63 @@ class Ui_MainWindow(object):
         MainWindow.resize(783, 665)
         self.centralwidget = QWidget(MainWindow)
         self.centralwidget.setObjectName(u"centralwidget")
-        self.comboBox = QComboBox(self.centralwidget)
-        self.comboBox.setObjectName(u"comboBox")
-        self.comboBox.setGeometry(QRect(150, 10, 371, 21))
-        self.label = QLabel(self.centralwidget)
+        self.tabWidget = QTabWidget(self.centralwidget)
+        self.tabWidget.setObjectName(u"tabWidget")
+        self.tabWidget.setGeometry(QRect(30, 20, 721, 621))
+        self.tabWidget.setTabPosition(QTabWidget.TabPosition.West)
+        self.tabWidget.setTabShape(QTabWidget.TabShape.Rounded)
+        self.tabWidget.setElideMode(Qt.TextElideMode.ElideNone)
+        self.bomBrowserTab = QWidget()
+        self.bomBrowserTab.setObjectName(u"bomBrowserTab")
+        self.filterTextInput = QPlainTextEdit(self.bomBrowserTab)
+        self.filterTextInput.setObjectName(u"filterTextInput")
+        self.filterTextInput.setGeometry(QRect(430, 10, 141, 31))
+        self.BOMtreeWidget = QTreeWidget(self.bomBrowserTab)
+        self.BOMtreeWidget.headerItem().setText(0, "")
+        self.BOMtreeWidget.setObjectName(u"BOMtreeWidget")
+        self.BOMtreeWidget.setGeometry(QRect(0, 50, 681, 551))
+        self.BOMtreeWidget.setAlternatingRowColors(True)
+        self.BOMtreeWidget.setHeaderHidden(False)
+        self.BOMtreeWidget.setColumnCount(4)
+        self.label = QLabel(self.bomBrowserTab)
         self.label.setObjectName(u"label")
-        self.label.setGeometry(QRect(100, 10, 55, 16))
-        self.treeWidget = QTreeWidget(self.centralwidget)
-        self.treeWidget.headerItem().setText(0, "")
-        self.treeWidget.setObjectName(u"treeWidget")
-        self.treeWidget.setGeometry(QRect(40, 60, 411, 551))
-        self.treeWidget.setHeaderHidden(False)
-        self.treeWidget.setColumnCount(4)
-        self.BOMBrowser = QFrame(self.centralwidget)
-        self.BOMBrowser.setObjectName(u"BOMBrowser")
-        self.BOMBrowser.setGeometry(QRect(20, 50, 731, 561))
-        self.BOMBrowser.setFrameShape(QFrame.StyledPanel)
-        self.BOMBrowser.setFrameShadow(QFrame.Raised)
+        self.label.setGeometry(QRect(10, 10, 55, 16))
+        self.projectComboBox = QComboBox(self.bomBrowserTab)
+        self.projectComboBox.setObjectName(u"projectComboBox")
+        self.projectComboBox.setGeometry(QRect(50, 10, 371, 21))
+        self.filterClearButton = QPushButton(self.bomBrowserTab)
+        self.filterClearButton.setObjectName(u"filterClearButton")
+        self.filterClearButton.setGeometry(QRect(590, 10, 75, 24))
+        self.tabWidget.addTab(self.bomBrowserTab, "")
+        self.tab_2 = QWidget()
+        self.tab_2.setObjectName(u"tab_2")
+        self.widget = QWidget(self.tab_2)
+        self.widget.setObjectName(u"widget")
+        self.widget.setGeometry(QRect(90, 110, 120, 80))
+        self.tabWidget.addTab(self.tab_2, "")
         MainWindow.setCentralWidget(self.centralwidget)
-        self.BOMBrowser.raise_()
-        self.comboBox.raise_()
-        self.label.raise_()
-        self.treeWidget.raise_()
-        self.menubar = QMenuBar(MainWindow)
-        self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 783, 21))
-        MainWindow.setMenuBar(self.menubar)
         self.statusbar = QStatusBar(MainWindow)
         self.statusbar.setObjectName(u"statusbar")
         MainWindow.setStatusBar(self.statusbar)
 
         self.retranslateUi(MainWindow)
 
+        self.tabWidget.setCurrentIndex(0)
+
+
         QMetaObject.connectSlotsByName(MainWindow)
     # setupUi
 
     def retranslateUi(self, MainWindow):
         MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))
-        self.label.setText(QCoreApplication.translate("MainWindow", u"Project", None))
-        ___qtreewidgetitem = self.treeWidget.headerItem()
+        self.filterTextInput.setPlaceholderText(QCoreApplication.translate("MainWindow", u"filter", None))
+        ___qtreewidgetitem = self.BOMtreeWidget.headerItem()
         ___qtreewidgetitem.setText(3, QCoreApplication.translate("MainWindow", u"Qty", None));
         ___qtreewidgetitem.setText(2, QCoreApplication.translate("MainWindow", u"Name", None));
         ___qtreewidgetitem.setText(1, QCoreApplication.translate("MainWindow", u"Unit #", None));
+        self.label.setText(QCoreApplication.translate("MainWindow", u"Project", None))
+        self.filterClearButton.setText(QCoreApplication.translate("MainWindow", u"clear", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.bomBrowserTab), QCoreApplication.translate("MainWindow", u"BOM Browser", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_2), QCoreApplication.translate("MainWindow", u"Tab 2", None))
     # retranslateUi
 

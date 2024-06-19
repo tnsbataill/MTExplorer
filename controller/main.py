@@ -2,8 +2,9 @@
 
 from model.main import Model
 from view.main import View
+import sys
 
-from controller.bombrowser import BomBrowserController
+from controller.bombroswerqt import BomBrowserController
 
 class Controller:
     "Main controller Class"
@@ -25,4 +26,6 @@ class Controller:
 
     def start(self) -> None:
         """Initiation of program loop"""
-        self.view.start_mainloop()
+        self.view.show()
+
+

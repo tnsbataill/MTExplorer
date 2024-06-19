@@ -2,7 +2,6 @@
 
 import os.path
 from tkinter import StringVar
-import fitz
 from PIL import Image, ImageTk
 from model.main import Model
 from view.main import View

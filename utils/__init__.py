@@ -1,3 +1,3 @@
 """init for pylint"""
 
-import pyodbc
+import PySide6
