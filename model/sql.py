@@ -2,28 +2,29 @@
 
 from time import time
 from tkinter import messagebox
-from pyodbc import connect, Error
-import pandas
+from typing import Optional
+from sqlalchemy import create_engine
+import pandas as pd
 
-def get_datatable(self, sqlstring: str) -> pandas.DataFrame:
+def get_datatable(self, sqlstring: str) -> Optional[pd.DataFrame]:
     """retrieves the datatable based on request string"""
-    self.connectionString = "Driver={SQL Server};Server=NAmtsql;Database=Matix;Trusted_Connection=True"
-    self.connectionStringFallback = "Driver={SQL Server};Server=TN5715-L103;Uid=TESTUSER;Pwd=testuser123;"
-    self.connectionStringFallbacker = "Driver={SQL Server};Provider=SQLOLEDB.1;Password=testuser123;User ID=TESTUSER;Initial Catalog=Matix;Data Source=TN5715-L103"
+    database_url = "mssql+pyodbc://NAmtsql/Matix?trusted_connection=yes&driver=SQL+Server"
+    database_url_fallback = "mssql+pyodbc://TESTUSER:testuser123@TN5715-L103/Matix?driver=SQL+Server"
+    
     self.matixsqldb = None
     self.returnstring = None
     self.table = None
 
     try:
         start_time = time()
-        matixsqldb = connect(self.connectionString, timeout=3, readonly=True,)
-        table = pandas.read_sql(sqlstring, matixsqldb)
-        if matixsqldb is not None:
-            matixsqldb.close()
-            comm_time = round(time() - start_time, 4)
-            print("Database connection complete, communication time", comm_time, "s")
-    except Error as error:
-        messagebox.showerror(title="Sql Error", message=error)
+        # Create an SQLAlchemy engine
+        engine = create_engine(database_url)
+        # Use the engine in pandas.read_sql
+        table = pd.read_sql(sqlstring, engine)
+        comm_time = round(time() - start_time, 4)
+        print(f"Database connection complete, communication time {comm_time}s")
+    except Exception as error:
+        messagebox.showerror(title="SQL Error", message=str(error))
         print("Connection failed", error)
         table = None
 

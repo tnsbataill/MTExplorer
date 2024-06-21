@@ -41,11 +41,13 @@ class Ui_MainWindow(object):
         self.filterTextInput.setGeometry(QRect(430, 10, 141, 31))
         self.BOMtreeWidget = QTreeWidget(self.bomBrowserTab)
         self.BOMtreeWidget.headerItem().setText(0, "")
+        self.BOMtreeWidget.headerItem().setText(1, "")
         self.BOMtreeWidget.setObjectName(u"BOMtreeWidget")
-        self.BOMtreeWidget.setGeometry(QRect(0, 50, 681, 551))
+        self.BOMtreeWidget.setGeometry(QRect(10, 50, 671, 551))
         self.BOMtreeWidget.setAlternatingRowColors(True)
         self.BOMtreeWidget.setHeaderHidden(False)
-        self.BOMtreeWidget.setColumnCount(4)
+        self.BOMtreeWidget.setColumnCount(6)
+        self.BOMtreeWidget.header().setCascadingSectionResizes(True)
         self.label = QLabel(self.bomBrowserTab)
         self.label.setObjectName(u"label")
         self.label.setGeometry(QRect(10, 10, 55, 16))
@@ -79,9 +81,10 @@ class Ui_MainWindow(object):
         MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))
         self.filterTextInput.setPlaceholderText(QCoreApplication.translate("MainWindow", u"filter", None))
         ___qtreewidgetitem = self.BOMtreeWidget.headerItem()
+        ___qtreewidgetitem.setText(5, QCoreApplication.translate("MainWindow", u"Filename", None));
+        ___qtreewidgetitem.setText(4, QCoreApplication.translate("MainWindow", u"Part Name", None));
         ___qtreewidgetitem.setText(3, QCoreApplication.translate("MainWindow", u"Qty", None));
-        ___qtreewidgetitem.setText(2, QCoreApplication.translate("MainWindow", u"Name", None));
-        ___qtreewidgetitem.setText(1, QCoreApplication.translate("MainWindow", u"Unit #", None));
+        ___qtreewidgetitem.setText(2, QCoreApplication.translate("MainWindow", u"Part #", None));
         self.label.setText(QCoreApplication.translate("MainWindow", u"Project", None))
         self.filterClearButton.setText(QCoreApplication.translate("MainWindow", u"clear", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.bomBrowserTab), QCoreApplication.translate("MainWindow", u"BOM Browser", None))
