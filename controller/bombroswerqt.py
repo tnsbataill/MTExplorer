@@ -96,25 +96,34 @@ class BomBrowserController:
         self.ui.BOMtreeWidget.clear()
 
         if self.model.bom.bom_list is not None:
-            for item in self.model.bom.bom_list.iloc:
+            self.model.bom.bom_list.sort_values(by=["Position"])
+            tree_items = {}
+            for item in self.model.bom.bom_list.iloc():
                 item_iid = item['Child']
-                item_parent = ''
+                item_position = item['Position']
+                item_image = self._get_item_image(item['listASP'], item['Child'])
+                tree_item = QTreeWidgetItem([
+                    item_iid, item['Balloon'], item['Mnumber'],
+                    str(int(item['Qty'])), item['Name'], item['FileName']
+                    ])
+                tree_item.setIcon(0, item_image)
+
+                if '.' in item_position:
+                    parent_position = '.'.join(item_position.split('.')[:-1])
+                    parent_item = tree_items.get(parent_position, None)
+                    if parent_item:
+                            parent_item.addChild(tree_item)
+                    else:
+                        self.ui.BOMtreeWidget.addTopLevelItem(tree_item)
+                else:
+                    self.ui.BOMtreeWidget.addTopLevelItem(tree_item)
+                tree_items[item_position] = tree_item
 
                 if not self._item_exists_in_tree(item['Child']):
                     item_parent = item['Parent']
                 elif item['Path'] == '':
                     item_iid = item['Child']
 
-                item_image = self._get_item_image(item['listASP'], item['Child'])
-                tree_item = QTreeWidgetItem([item_iid, item['Balloon'], item['Mnumber'], \
-                    str(int(item['Qty'])), item['Name'], item['FileName']])
-                tree_item.setIcon(0, item_image)
-                if item_parent == "":
-                    self.ui.BOMtreeWidget.addTopLevelItem(tree_item)
-                else:
-                    parent_item = self._find_item_by_iid(item_parent)
-                    if parent_item:
-                        parent_item.addChild(tree_item)
         for i in range(self.ui.BOMtreeWidget.columnCount()):
             self.ui.BOMtreeWidget.resizeColumnToContents(i)
         first_item = self.ui.BOMtreeWidget.topLevelItem(0)

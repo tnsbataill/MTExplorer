@@ -12,7 +12,7 @@ class Boms(ObservableModel):
     def __init__(self):
         super().__init__()
         self.home_dir: str = os.path.expanduser("~")
-        self.bomslistbase: pd.DataFrame = None
+        self.bomslistbase: pd.DataFrame = pd.DataFrame()
         self.bomslist: pd.DataFrame = self.bomslistbase
         self.selected_bom: str = None
         self.currentfilter: str = None
@@ -28,7 +28,8 @@ class Boms(ObservableModel):
             self.bomslist = self.bomslistbase
             self.trigger_event("boms_changed")
             save_path = [self.home_dir, utils.strings.BOMS_PKL_PATH]
-            self.bomslistbase.to_pickle(''.join(save_path), 'infer')
+            self.bomslistbase.to_pickle(path=''.join(save_path), compression='infer')
+
 
     def load_boms_list_csv(self) -> None:
         """load local csv of boms list"""
