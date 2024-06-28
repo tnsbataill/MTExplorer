@@ -1,7 +1,9 @@
 # bombrowser.py
 import os.path
-from PySide6.QtCore import Qt, Slot
-from sqlalchemy import false
+import string
+from PySide6.QtCore import Qt, Slot, QCoreApplication, QRunnable, QThreadPool
+import concurrent.futures
+from sqlalchemy import false, true
 ", QVariant"
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QTreeWidgetItem
@@ -15,28 +17,25 @@ class BomBrowserController:
         self.model = model
         self.view = view
         self.ui = self.view.root.ui
+        self._ui_setup()
         self._bind()
         self.boms_refresh()
+        self.thread_pool = QThreadPool()
+        self.loading_state("show")
+
+    def _ui_setup(self) -> None:
+        self.ui.loading_bar.setMinimum(0)
+        self.ui.loading_bar.setMaximum(0)
+        self.loading_state("show")
 
     def _bind(self) -> None:
         self.ui.filterTextInput.textChanged.connect(self.filter_change)
         #self.ui.BOMtreeWidget.doubleClicked.connect(self.bom_select)
         self.ui.filterClearButton.clicked.connect(self.filter_clear)
         self.ui.projectComboBox.currentIndexChanged.connect(self.bom_select)
+        self.ui.projectComboBox.currentIndexChanged.connect(self.loading_state("show"))
         self.ui.BOMtreeWidget.expanded.connect(self.node_clicked)
         self.ui.BOMtreeWidget.collapsed.connect(self.node_clicked)
-
-        # header = self.frame.boms_list.headerItem()
-        # head = self.ui.projectComboBox.
-        # header.setText(0, "M-Number")
-        # header.setText(1, "Job Number")
-        # header.setText(2, "Job Name")
-
-        # for col in range(header.columnCount()):
-        #     header.setData(col, Qt.UserRole, QVariant(header.text(col)))
-        #     header.setText(col, header.text(col))
-
-        # self.frame.boms_list.header().sectionClicked.connect(self.boms_sort)
 
     @Slot()
     def filter_clear(self) -> None:
@@ -89,46 +88,21 @@ class BomBrowserController:
             if self._search_tree(child_item, child_id):
                 return True
         return False
+    
+    class RefreshTask(QRunnable):
+        def __init__(self, controller):
+            super().__init__()
+            self.controller = controller
+
+        def run(self):
+            self.controller._refresh()
 
     def bom_refresh(self) -> None:
         """Deletes and reloads the BOM list"""
-        self.ui.BOMtreeWidget.setEnabled(False)
-        self.ui.BOMtreeWidget.clear()
-
-        if self.model.bom.bom_list is not None:
-            self.model.bom.bom_list.sort_values(by=["Position"])
-            tree_items = {}
-            for item in self.model.bom.bom_list.iloc():
-                item_iid = item['Child']
-                item_position = item['Position']
-                item_image = self._get_item_image(item['listASP'], item['Child'])
-                tree_item = QTreeWidgetItem([
-                    item_iid, item['Balloon'], item['Mnumber'],
-                    str(int(item['Qty'])), item['Name'], item['FileName']
-                    ])
-                tree_item.setIcon(0, item_image)
-
-                if '.' in item_position:
-                    parent_position = '.'.join(item_position.split('.')[:-1])
-                    parent_item = tree_items.get(parent_position, None)
-                    if parent_item:
-                            parent_item.addChild(tree_item)
-                    else:
-                        self.ui.BOMtreeWidget.addTopLevelItem(tree_item)
-                else:
-                    self.ui.BOMtreeWidget.addTopLevelItem(tree_item)
-                tree_items[item_position] = tree_item
-
-                if not self._item_exists_in_tree(item['Child']):
-                    item_parent = item['Parent']
-                elif item['Path'] == '':
-                    item_iid = item['Child']
-
-        for i in range(self.ui.BOMtreeWidget.columnCount()):
-            self.ui.BOMtreeWidget.resizeColumnToContents(i)
-        first_item = self.ui.BOMtreeWidget.topLevelItem(0)
-        self.ui.BOMtreeWidget.expandItem(first_item)
-        self.ui.BOMtreeWidget.setEnabled(True)
+        self.loading_state("show")
+        QCoreApplication.processEvents()  # Process events to update UI
+        task = self.RefreshTask(self)
+        self.thread_pool.start(task)
 
     def _find_item_by_iid(self, iid):
         root = self.ui.BOMtreeWidget.invisibleRootItem()
@@ -141,7 +115,7 @@ class BomBrowserController:
     def _get_item_image(self, listASP, child):
         image_path = None
         if listASP in ["A", "S"]:
-            image_path = ":/icons/Part.png"
+            image_path = ":/icons/Assembly.png"
         elif listASP == "P":
             image_path = ":/icons/Part.png" if child[0] == "M" else ":/icons/purch.png"
         elif listASP == "Z":
@@ -152,9 +126,7 @@ class BomBrowserController:
         pixmap = QPixmap(image_path)
         if pixmap.isNull():
             print(f"Failed to load image: {image_path}")
-        else:
-            print(f"Successfully loaded image: {image_path}")
-        
+
         # Resize the pixmap to the desired icon size (e.g., 16x16 pixels)
         icon_size = 32
         pixmap = pixmap.scaled(icon_size, icon_size, \
@@ -181,3 +153,60 @@ class BomBrowserController:
                 # Create a display string for the combo box item with multiple columns
                 display_text = f"{item.iloc[0]} | {item.iloc[4]} | {item.iloc[1]}"
                 self.ui.projectComboBox.addItem(display_text)
+
+    @Slot()
+    def loading_state(self, state: str) -> None:
+        if state == "show":
+            self.ui.loading_bar.show()
+            self.ui.loading_label.show()
+        elif state == "hide":
+            self.ui.loading_bar.hide()
+            self.ui.loading_label.hide()
+        else:
+            print(f"Error: Incorrect argument for loading state: {state}")
+
+    def _refresh(self):
+        self.ui.BOMtreeWidget.setEnabled(False)
+        self.ui.BOMtreeWidget.clear()
+
+        if self.model.bom.bom_list is not None:
+            tree_items = {}
+            for item in self.model.bom.bom_list.iloc():
+                #item_iid =  item['Child']
+                item_iid = item['PurNo'] if item['Child'][0] == "Z" else item['Child']
+                item_qty = str(int(item['Qty'])) if item['Qty'] > 0 else ""
+                item_position = item['Position']
+                item_image = self._get_item_image(item['listASP'], item['Child'])
+                tree_item = QTreeWidgetItem([
+                    item_iid, item['Balloon'], item_qty, 
+                    item['Name']
+                ])
+                tree_item.setIcon(0, item_image)
+
+                if item_position in tree_items:
+                    pass
+                else:
+                    if '.' in item_position:
+                        parent_position = '.'.join(item_position.split('.')[:-1])
+                        parent_item = tree_items.get(parent_position, None)
+                        if parent_item:
+                            parent_item.addChild(tree_item)
+                        else:
+                            self.ui.BOMtreeWidget.addTopLevelItem(tree_item)
+                    else:
+                        self.ui.BOMtreeWidget.addTopLevelItem(tree_item)
+                    tree_items[item_position] = tree_item
+
+                if not self._item_exists_in_tree(item['Child']):
+                    item_parent = item['Parent']
+                elif item['Path'] == '':
+                    item_iid = item['Child']
+
+            for i in range(self.ui.BOMtreeWidget.columnCount()):
+                self.ui.BOMtreeWidget.resizeColumnToContents(i)
+            first_item = self.ui.BOMtreeWidget.topLevelItem(0)
+            self.ui.BOMtreeWidget.expandItem(first_item)
+
+        self.ui.BOMtreeWidget.setEnabled(True)
+        QCoreApplication.processEvents()  # Process events to update UI
+        self.loading_state("hide")

@@ -16,9 +16,9 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QComboBox, QHeaderView, QLabel,
-    QMainWindow, QPlainTextEdit, QPushButton, QSizePolicy,
-    QStatusBar, QTabWidget, QTreeWidget, QTreeWidgetItem,
-    QWidget)
+    QMainWindow, QPlainTextEdit, QProgressBar, QPushButton,
+    QSizePolicy, QStatusBar, QTabWidget, QTreeWidget,
+    QTreeWidgetItem, QWidget)
 import images.qresources_rc
 
 class Ui_MainWindow(object):
@@ -40,13 +40,12 @@ class Ui_MainWindow(object):
         self.filterTextInput.setObjectName(u"filterTextInput")
         self.filterTextInput.setGeometry(QRect(430, 10, 141, 31))
         self.BOMtreeWidget = QTreeWidget(self.bomBrowserTab)
-        self.BOMtreeWidget.headerItem().setText(0, "")
         self.BOMtreeWidget.headerItem().setText(1, "")
         self.BOMtreeWidget.setObjectName(u"BOMtreeWidget")
         self.BOMtreeWidget.setGeometry(QRect(10, 50, 671, 551))
         self.BOMtreeWidget.setAlternatingRowColors(True)
         self.BOMtreeWidget.setHeaderHidden(False)
-        self.BOMtreeWidget.setColumnCount(6)
+        self.BOMtreeWidget.setColumnCount(4)
         self.BOMtreeWidget.header().setCascadingSectionResizes(True)
         self.label = QLabel(self.bomBrowserTab)
         self.label.setObjectName(u"label")
@@ -57,6 +56,14 @@ class Ui_MainWindow(object):
         self.filterClearButton = QPushButton(self.bomBrowserTab)
         self.filterClearButton.setObjectName(u"filterClearButton")
         self.filterClearButton.setGeometry(QRect(590, 10, 75, 24))
+        self.loading_bar = QProgressBar(self.bomBrowserTab)
+        self.loading_bar.setObjectName(u"loading_bar")
+        self.loading_bar.setGeometry(QRect(270, 320, 118, 23))
+        self.loading_bar.setValue(24)
+        self.loading_bar.setTextVisible(False)
+        self.loading_label = QLabel(self.bomBrowserTab)
+        self.loading_label.setObjectName(u"loading_label")
+        self.loading_label.setGeometry(QRect(300, 290, 49, 16))
         self.tabWidget.addTab(self.bomBrowserTab, "")
         self.tab_2 = QWidget()
         self.tab_2.setObjectName(u"tab_2")
@@ -81,12 +88,12 @@ class Ui_MainWindow(object):
         MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))
         self.filterTextInput.setPlaceholderText(QCoreApplication.translate("MainWindow", u"filter", None))
         ___qtreewidgetitem = self.BOMtreeWidget.headerItem()
-        ___qtreewidgetitem.setText(5, QCoreApplication.translate("MainWindow", u"Filename", None));
-        ___qtreewidgetitem.setText(4, QCoreApplication.translate("MainWindow", u"Part Name", None));
-        ___qtreewidgetitem.setText(3, QCoreApplication.translate("MainWindow", u"Qty", None));
-        ___qtreewidgetitem.setText(2, QCoreApplication.translate("MainWindow", u"Part #", None));
+        ___qtreewidgetitem.setText(3, QCoreApplication.translate("MainWindow", u"Part Name", None));
+        ___qtreewidgetitem.setText(2, QCoreApplication.translate("MainWindow", u"Qty", None));
+        ___qtreewidgetitem.setText(0, QCoreApplication.translate("MainWindow", u"Part #", None));
         self.label.setText(QCoreApplication.translate("MainWindow", u"Project", None))
         self.filterClearButton.setText(QCoreApplication.translate("MainWindow", u"clear", None))
+        self.loading_label.setText(QCoreApplication.translate("MainWindow", u"Loading...", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.bomBrowserTab), QCoreApplication.translate("MainWindow", u"BOM Browser", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_2), QCoreApplication.translate("MainWindow", u"Tab 2", None))
     # retranslateUi
